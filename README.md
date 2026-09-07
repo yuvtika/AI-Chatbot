@@ -1,5 +1,11 @@
 # ShopAI — AI Shopping Assistant 🛍️
 
+[![Live Demo](https://img.shields.io/badge/Live_Demo-shopai--ovlc.onrender.com-06b6d4?style=for-the-badge&logo=render&logoColor=white)](https://shopai-ovlc.onrender.com)
+[![Status](https://img.shields.io/badge/Status-Active_Live-10b981?style=for-the-badge)](https://shopai-ovlc.onrender.com)
+[![Tech Stack](https://img.shields.io/badge/AI-Google_Gemini-8b5cf6?style=for-the-badge&logo=google)](https://shopai-ovlc.onrender.com)
+
+> 🚀 **Live Application Link**: **[https://shopai-ovlc.onrender.com](https://shopai-ovlc.onrender.com/)**
+
 A sleek, modern, and intelligent AI-powered shopping assistant built with Vanilla JavaScript, HTML5, CSS3, Google's Gemini API, and DuckDuckGo Web Search. ShopAI delivers conversational product discovery, smart recommendations from both its internal catalog and the live web, product comparisons, and an interactive shopping cart with pricing in Indian Rupees (INR / ₹).
 
 ---
