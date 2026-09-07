@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ShopAI — Your personal AI-powered shopping assistant. Get smart product recommendations, compare prices, and discover deals.">
+  <title>ShopAI — AI Shopping Assistant</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛍️</text></svg>">
+</head>
+<body>
+
+  <!-- Animated Background -->
+  <div class="app-bg"></div>
+
+  <!-- Main App -->
+  <div class="app">
+
+    <!-- ─── Chat Panel ──────────────────────────────── -->
+    <div class="chat-panel">
+
+      <!-- Chat Header -->
+      <header class="chat-header">
+        <div class="chat-header-left">
+          <div class="chat-logo">🛍️</div>
+          <div>
+            <div class="chat-title">ShopAI</div>
+            <div class="chat-subtitle">Your AI Shopping Assistant</div>
+          </div>
+        </div>
+        <div class="chat-header-right">
+          <button class="header-btn product-panel-toggle" onclick="toggleProductPanel()" title="Browse Products">
+            📦
+          </button>
+          <button class="header-btn" onclick="showApiKeyModal()" title="API Settings">
+            ⚙️
+          </button>
+          <button class="header-btn cart-btn" onclick="toggleCart()" title="Shopping Cart">
+            🛒
+            <span class="cart-badge" id="cart-badge">0</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Chat Messages -->
+      <div class="chat-messages" id="chat-messages">
+        <!-- Welcome screen rendered by JS -->
+      </div>
+
+      <!-- Chat Input -->
+      <div class="chat-input-area">
+        <div class="chat-input-container">
+          <textarea
+            id="chat-input"
+            class="chat-input"
+            placeholder="Ask me about products, recommendations, deals..."
+            rows="1"
+          ></textarea>
+          <button class="send-btn" id="send-btn" disabled title="Send message">
+            ➤
+          </button>
+        </div>
+        <div class="chat-disclaimer">
+          Powered by Google Gemini AI · Responses may not always be accurate
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ─── Product Panel ───────────────────────────── -->
+    <aside class="product-panel" id="product-panel">
+
+      <!-- Product Header -->
+      <div class="product-panel-header">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div class="product-panel-title">🏪 Browse Products</div>
+          <button class="header-btn product-panel-close" onclick="toggleProductPanel()" style="width: 32px; height: 32px; font-size: 0.9rem;">✕</button>
+        </div>
+        <div class="search-wrapper">
+          <span class="search-icon">🔍</span>
+          <input
+            type="text"
+            class="product-search"
+            id="product-search"
+            placeholder="Search products..."
+          >
+        </div>
+      </div>
+
+      <!-- Category Filters -->
+      <div class="category-filters" id="category-filters">
+        <!-- Rendered by JS -->
+      </div>
+
+      <!-- Product Grid -->
+      <div class="product-grid" id="product-grid">
+        <!-- Rendered by JS -->
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- ─── Cart Drawer ─────────────────────────────── -->
+  <div class="cart-overlay" id="cart-overlay"></div>
+  <div class="cart-drawer" id="cart-drawer">
+    <div class="cart-drawer-header">
+      <div class="cart-drawer-title">🛒 Shopping Cart</div>
+      <button class="cart-close-btn" onclick="toggleCart()">✕</button>
+    </div>
+    <div class="cart-items" id="cart-items">
+      <!-- Rendered by JS -->
+    </div>
+    <div class="cart-footer" id="cart-footer" style="display: none;">
+      <div class="cart-summary" id="cart-summary">
+        <!-- Rendered by JS -->
+      </div>
+      <button class="checkout-btn" onclick="showToast('🎉 Checkout coming soon!')">
+        Proceed to Checkout →
+      </button>
+    </div>
+  </div>
+
+  <!-- ─── API Key Modal ───────────────────────────── -->
+  <div class="modal-overlay" id="api-key-modal">
+    <div class="modal">
+      <div class="modal-icon">🔑</div>
+      <h2 class="modal-title">Connect to Gemini AI</h2>
+      <p class="modal-description">
+        Enter your Google Gemini API key to power the AI assistant.
+        <br>Get a free key at <a href="https://aistudio.google.com" target="_blank" style="color: var(--accent-secondary);">aistudio.google.com</a>
+      </p>
+      <input
+        type="password"
+        class="modal-input"
+        id="api-key-input"
+        placeholder="Enter your Gemini API key..."
+      >
+      <button class="modal-btn" onclick="saveApiKey()">
+        Connect & Start Shopping 🛍️
+      </button>
+      <div class="modal-error" id="api-key-error"></div>
+    </div>
+  </div>
+
+  <!-- ─── Toast Container ─────────────────────────── -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="products.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
