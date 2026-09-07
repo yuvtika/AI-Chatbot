@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="ShopAI — Your personal AI-powered shopping assistant. Get smart product recommendations, compare prices, and discover deals.">
   <title>ShopAI — AI Shopping Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛍️</text></svg>">
 </head>
@@ -123,7 +126,8 @@
 
   <!-- ─── API Key Modal ───────────────────────────── -->
   <div class="modal-overlay" id="api-key-modal">
-    <div class="modal">
+    <div class="modal" style="position: relative;">
+      <button onclick="hideApiKeyModal()" style="position: absolute; top: 18px; right: 18px; background: none; border: none; color: var(--text-secondary); font-size: 1.2rem; cursor: pointer; padding: 4px 8px; border-radius: 6px;">✕</button>
       <div class="modal-icon">🔑</div>
       <h2 class="modal-title">Connect to Gemini AI</h2>
       <p class="modal-description">

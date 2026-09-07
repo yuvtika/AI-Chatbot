@@ -1,10 +1,18 @@
-// ─── ShopAI — Main Application ──────────────────────────────────
-// AI-powered shopping assistant with Gemini API integration
+// ─── Configuration ──────────────────────────────────────────────
+
 
 // ─── State ──────────────────────────────────────────────────────
+function getInitialApiKey() {
+  const windowKey = typeof window !== 'undefined' ? window.__GEMINI_API_KEY__ : null;
+  const localKey = typeof localStorage !== 'undefined' ? localStorage.getItem('shopai_api_key') : null;
+  const key = windowKey || localKey || null;
+  if (!key || key === 'null' || key === 'undefined' || key.trim() === '') return null;
+  return key.trim();
+}
+
 const state = {
-  apiKey: localStorage.getItem('shopai_api_key') || '',
-  cart: JSON.parse(localStorage.getItem('shopai_cart') || '[]'),
+  apiKey: getInitialApiKey(),
+  cart: JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem('shopai_cart')) || '[]'),
   messages: [],
   isTyping: false,
   activeCategory: 'all',
@@ -12,33 +20,109 @@ const state = {
   cartOpen: false,
 };
 
-// ─── Gemini API ─────────────────────────────────────────────────
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+// ─── Currency Formatter ─────────────────────────────────────────
+function formatINR(amount) {
+  return '₹' + Math.round(amount).toLocaleString('en-IN');
+}
 
-const SYSTEM_PROMPT = `You are ShopAI, a friendly and knowledgeable AI shopping assistant. You help users find products, make recommendations, compare items, and answer shopping questions.
+// ─── Gemini API ─────────────────────────────────────────────────
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+];
+
+const SYSTEM_PROMPT = `You are ShopAI, a friendly and knowledgeable AI shopping assistant. You help users find products, make recommendations, compare items, and answer shopping questions. All prices are in Indian Rupees (₹ / INR).
 
 IMPORTANT RULES:
 1. When recommending products, ALWAYS reference them by their exact ID using this format: [[PRODUCT:id]] (e.g., [[PRODUCT:1]] for MacBook Pro)
 2. You can recommend multiple products in a single response
 3. Be enthusiastic but honest. Mention pros and help users make informed decisions
-4. If a user asks for something not in the catalog, suggest the closest alternatives
+4. If a user asks for something not in the catalog, explain what alternatives are available or note that web recommendations have also been retrieved for them
 5. Keep responses concise but helpful (2-4 short paragraphs max)
 6. Use markdown-style formatting: **bold** for emphasis, bullet points for lists
 7. When comparing products, highlight key differences clearly
-8. If user mentions a budget, respect it strictly
+8. If user mentions a budget (e.g., under ₹10,000 or under ₹50,000), respect it strictly in INR
 9. Always consider the user's stated use case when recommending
+10. Quote and reference prices in Indian Rupees (₹)
 
 Here is the complete product catalog:
 
 ${getCatalogSummary()}
 
-Remember: ALWAYS use [[PRODUCT:id]] format when mentioning products so they can be displayed as interactive cards.`;
+Remember: ALWAYS use [[PRODUCT:id]] format when mentioning catalog products so they can be displayed as interactive cards.`;
+
+// ─── DuckDuckGo External Web Search ─────────────────────────────
+async function searchExternalProducts(query) {
+  if (!query || query.trim().length < 2) return [];
+  const cleanQ = query.replace(/[^\w\s]/gi, ' ').trim();
+  
+  // Strategy 1: Try backend proxy (avoids CORS)
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(cleanQ)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        return data;
+      }
+    }
+  } catch (e) {
+    // Backend proxy unavailable (e.g. running directly or via another server)
+  }
+
+  // Strategy 2: Direct client-side JSONP or fallback search results
+  try {
+    const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQ)}&format=json&no_html=1&skip_disambig=1`;
+    const res = await fetch(ddgUrl);
+    if (res.ok) {
+      const data = await res.json();
+      const results = [];
+      if (data.Heading && data.AbstractText) {
+        results.push({
+          title: data.Heading,
+          description: data.AbstractText,
+          url: data.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(cleanQ)}`
+        });
+      }
+      if (Array.isArray(data.RelatedTopics)) {
+        for (const topic of data.RelatedTopics) {
+          if (topic.Text && topic.FirstURL) {
+            results.push({
+              title: topic.Text.split(' - ')[0] || topic.Text.slice(0, 50),
+              description: topic.Text,
+              url: topic.FirstURL
+            });
+          }
+        }
+      }
+      if (results.length > 0) return results.slice(0, 4);
+    }
+  } catch (e) {
+    // CORS or network error on direct fetch
+  }
+
+  // Fallback: Return curated direct shopping search links so the user can always redirect
+  return [
+    {
+      title: `${query} on Amazon`,
+      description: `Browse latest deals and customer reviews for "${query}" on Amazon India.`,
+      url: `https://www.amazon.in/s?k=${encodeURIComponent(query)}`
+    },
+    {
+      title: `${query} on Flipkart`,
+      description: `Explore models, prices, discounts, and offers for "${query}" on Flipkart.`,
+      url: `https://www.flipkart.com/search?q=${encodeURIComponent(query)}`
+    }
+  ];
+}
 
 async function sendToGemini(userMessage) {
-  // Build conversation history
-  const contents = [];
+  if (!state.apiKey) {
+    showApiKeyModal();
+    throw new Error('Please enter your Gemini API key to chat with ShopAI.');
+  }
 
-  // Add conversation history (last 10 messages for context window)
+  const contents = [];
   const recentMessages = state.messages.slice(-10);
   for (const msg of recentMessages) {
     contents.push({
@@ -47,77 +131,104 @@ async function sendToGemini(userMessage) {
     });
   }
 
-  // Add current message
   contents.push({
     role: 'user',
     parts: [{ text: userMessage }]
   });
 
-  const response = await fetch(`${GEMINI_API_URL}?key=${state.apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents,
-      systemInstruction: {
-        parts: [{ text: SYSTEM_PROMPT }]
-      },
-      generationConfig: {
-        temperature: 0.8,
-        topP: 0.95,
-        topK: 40,
-        maxOutputTokens: 1024,
-      }
-    })
-  });
+  const requestBody = {
+    contents,
+    systemInstruction: {
+      parts: [{ text: SYSTEM_PROMPT }]
+    },
+    generationConfig: {
+      temperature: 0.8,
+      topP: 0.95,
+      topK: 40,
+      maxOutputTokens: 1024,
+    }
+  };
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `API error: ${response.status}`);
+  let lastError = null;
+
+  for (const model of GEMINI_MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${state.apiKey}`;
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const candidate = data.candidates?.[0];
+        if (candidate?.content?.parts?.[0]?.text) {
+          return candidate.content.parts[0].text;
+        }
+      } else {
+        const err = await response.json().catch(() => ({}));
+        lastError = new Error(err.error?.message || `API error: ${response.status}`);
+        
+        // If the API key is unauthorized or invalid, open modal
+        if (response.status === 400 && (err.error?.message?.includes('API_KEY') || err.error?.message?.includes('API key'))) {
+          showApiKeyModal();
+          throw lastError;
+        }
+
+        // If it's a model not found / deprecated error, continue to next model
+        if (response.status === 404 || err.error?.message?.includes('not found') || err.error?.message?.includes('no longer available')) {
+          continue;
+        }
+        throw lastError;
+      }
+    } catch (e) {
+      lastError = e;
+      if (model === GEMINI_MODELS[GEMINI_MODELS.length - 1]) {
+        throw lastError;
+      }
+    }
   }
 
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I couldn\'t generate a response. Please try again.';
+  throw lastError || new Error('Unable to connect to Gemini AI.');
 }
 
 // ─── Message Parsing ────────────────────────────────────────────
 function parseAIResponse(text) {
-  // Extract product references [[PRODUCT:id]]
-  const productPattern = /\[\[PRODUCT:(\d+)\]\]/g;
   const productIds = [];
+  const productRegex = /\[\[PRODUCT:(\d+)\]\]/g;
   let match;
 
-  while ((match = productPattern.exec(text)) !== null) {
-    const id = parseInt(match[1]);
-    if (getProductById(id) && !productIds.includes(id)) {
+  while ((match = productRegex.exec(text)) !== null) {
+    const id = parseInt(match[1], 10);
+    if (!productIds.includes(id) && getProductById(id)) {
       productIds.push(id);
     }
   }
 
-  // Clean the text: remove product markers
-  let cleanText = text.replace(/\[\[PRODUCT:\d+\]\]/g, '').trim();
+  const cleanText = text.replace(/\[\[PRODUCT:\d+\]\]/g, '').trim();
 
-  // Convert markdown-style formatting to HTML
-  cleanText = formatMessageText(cleanText);
-
-  return { html: cleanText, productIds };
+  return {
+    text: cleanText,
+    html: formatMarkdown(cleanText),
+    productIds,
+  };
 }
 
-function formatMessageText(text) {
-  // Bold
+function formatMarkdown(text) {
+  text = escapeHtml(text);
+
   text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
 
-  // Line breaks
-  text = text.replace(/\n\n/g, '</p><p>');
-  text = text.replace(/\n/g, '<br>');
-
-  // Bullet points
-  text = text.replace(/^[-•]\s+(.+)/gm, '<li>$1</li>');
-  text = text.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
-
-  // Wrap in paragraphs
-  if (!text.startsWith('<')) {
-    text = '<p>' + text + '</p>';
-  }
+  const paragraphs = text.split(/\n\n+/);
+  text = paragraphs.map(p => {
+    if (p.includes('\n- ') || p.startsWith('- ') || p.includes('\n• ') || p.startsWith('• ')) {
+      p = p.replace(/^[-•]\s+(.+)/gm, '<li>$1</li>');
+      return p.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+    }
+    return `<p>${p.replace(/\n/g, '<br>')}</p>`;
+  }).join('');
 
   return text;
 }
@@ -125,7 +236,7 @@ function formatMessageText(text) {
 // ─── UI Rendering ───────────────────────────────────────────────
 function renderWelcome() {
   const suggestions = [
-    { emoji: '💻', text: 'Find me a laptop under $1000' },
+    { emoji: '💻', text: 'Find me a laptop under ₹60,000' },
     { emoji: '🎁', text: 'Gift ideas for a tech lover' },
     { emoji: '🏃', text: 'Best running shoes for beginners' },
     { emoji: '☕', text: 'Top-rated coffee makers' },
@@ -149,6 +260,21 @@ function renderWelcome() {
   `;
 }
 
+function renderChatExternalCard(ext) {
+  return `
+    <div class="chat-external-card">
+      <span class="chat-external-badge">🌐 Web Product</span>
+      <div class="chat-external-body">
+        <div class="chat-external-title">${escapeHtml(ext.title)}</div>
+        <div class="chat-external-desc">${escapeHtml(ext.description)}</div>
+        <a href="${escapeHtml(ext.url)}" target="_blank" rel="noopener noreferrer" class="chat-external-link">
+          View Product ↗
+        </a>
+      </div>
+    </div>
+  `;
+}
+
 function renderMessage(msg) {
   const isUser = msg.role === 'user';
   const avatarEmoji = isUser ? '👤' : '🛍️';
@@ -166,12 +292,25 @@ function renderMessage(msg) {
     `;
   }
 
+  let externalCardsHtml = '';
+  if (msg.externalProducts && msg.externalProducts.length > 0) {
+    externalCardsHtml = `
+      <div class="chat-external-section">
+        <div class="chat-external-header">🌐 Recommended from the Web</div>
+        <div class="chat-product-cards">
+          ${msg.externalProducts.map(ext => renderChatExternalCard(ext)).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   return `
     <div class="message ${isUser ? 'user' : 'assistant'}">
       <div class="message-avatar">${avatarEmoji}</div>
       <div class="message-content">
         <div class="message-bubble">${msg.html || msg.text}</div>
         ${productCardsHtml}
+        ${externalCardsHtml}
       </div>
     </div>
   `;
@@ -189,7 +328,7 @@ function renderChatProductCard(product) {
       <div class="chat-card-body">
         <div class="chat-card-name">${product.name}</div>
         <div class="chat-card-meta">
-          <span class="chat-card-price">$${product.price}</span>
+          <span class="chat-card-price">${formatINR(product.price)}</span>
           <span class="chat-card-rating">★ ${product.rating}</span>
         </div>
         <button class="chat-card-add ${isInCart ? 'added' : ''}" onclick="event.stopPropagation(); addToCart(${product.id})">
@@ -241,15 +380,25 @@ async function sendMessage(text) {
   scrollToBottom();
 
   try {
-    // Call Gemini API
-    const response = await sendToGemini(text.trim());
+    // Call Gemini API and DuckDuckGo web search in parallel
+    const [response, externalProducts] = await Promise.all([
+      sendToGemini(text.trim()),
+      searchExternalProducts(text.trim())
+    ]);
+
     const parsed = parseAIResponse(response);
 
     // Remove typing indicator
     document.getElementById('typing-indicator')?.remove();
 
-    // Add AI message
-    const aiMsg = { role: 'assistant', text: response, html: parsed.html, productIds: parsed.productIds };
+    // Add AI message with catalog products AND external web recommendations
+    const aiMsg = {
+      role: 'assistant',
+      text: response,
+      html: parsed.html,
+      productIds: parsed.productIds,
+      externalProducts: externalProducts || []
+    };
     state.messages.push(aiMsg);
     chatMessages.insertAdjacentHTML('beforeend', renderMessage(aiMsg));
 
@@ -259,7 +408,7 @@ async function sendMessage(text) {
     const errorMsg = {
       role: 'assistant',
       text: error.message,
-      html: `<p>⚠️ ${escapeHtml(error.message)}</p><p>Please check your API key and try again.</p>`,
+      html: `<p>⚠️ ${escapeHtml(error.message)}</p>`,
       productIds: []
     };
     state.messages.push(errorMsg);
@@ -330,9 +479,9 @@ function renderProductGrid() {
           <div class="product-card-category">${p.category}</div>
           <div class="product-card-name" title="${p.name}">${p.name}</div>
           <div class="product-card-price-row">
-            <span class="product-card-price">$${p.price}</span>
+            <span class="product-card-price">${formatINR(p.price)}</span>
             ${discount > 0 ? `
-              <span class="product-card-original-price">$${p.originalPrice}</span>
+              <span class="product-card-original-price">${formatINR(p.originalPrice)}</span>
               <span class="product-card-discount">-${discount}%</span>
             ` : ''}
           </div>
@@ -509,7 +658,7 @@ function renderCartDrawer() {
         <div class="cart-item-image" style="background: ${p.gradient}">${p.emoji}</div>
         <div class="cart-item-info">
           <div class="cart-item-name">${p.name}</div>
-          <div class="cart-item-price">$${(p.price * item.qty).toLocaleString()}</div>
+          <div class="cart-item-price">${formatINR(p.price * item.qty)}</div>
           <div class="cart-item-controls">
             <button class="qty-btn" onclick="updateCartQty(${p.id}, -1)">−</button>
             <span class="cart-item-qty">${item.qty}</span>
@@ -523,26 +672,26 @@ function renderCartDrawer() {
 
   // Update summary
   const subtotal = getCartTotal();
-  const shipping = subtotal > 100 ? 0 : 9.99;
-  const tax = subtotal * 0.08;
+  const shipping = subtotal > 2000 ? 0 : 199;
+  const tax = subtotal * 0.18; // 18% GST standard in India
   const total = subtotal + shipping + tax;
 
   document.getElementById('cart-summary').innerHTML = `
     <div class="cart-summary-row">
       <span>Subtotal (${getCartCount()} items)</span>
-      <span>$${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+      <span>${formatINR(subtotal)}</span>
     </div>
     <div class="cart-summary-row">
-      <span>Shipping</span>
-      <span>${shipping === 0 ? 'FREE' : '$' + shipping.toFixed(2)}</span>
+      <span>Shipping (Free over ₹2,000)</span>
+      <span>${shipping === 0 ? '<strong style="color: #10b981;">FREE</strong>' : formatINR(shipping)}</span>
     </div>
     <div class="cart-summary-row">
-      <span>Tax</span>
-      <span>$${tax.toFixed(2)}</span>
+      <span>Estimated GST (18%)</span>
+      <span>${formatINR(tax)}</span>
     </div>
     <div class="cart-summary-row total">
       <span>Total</span>
-      <span>$${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+      <span>${formatINR(total)}</span>
     </div>
   `;
 }
@@ -585,7 +734,7 @@ function saveApiKey() {
   localStorage.setItem('shopai_api_key', key);
   error.classList.remove('visible');
   hideApiKeyModal();
-  showToast('🔑 API key saved successfully!');
+  showToast('🔑 API key updated successfully!');
 }
 
 // ─── Mobile Product Panel ───────────────────────────────────────
@@ -608,11 +757,6 @@ function initApp() {
   renderCategoryFilters();
   renderProductGrid();
   updateCartBadge();
-
-  // Check for API key
-  if (!state.apiKey) {
-    showApiKeyModal();
-  }
 
   // Chat input handlers
   input.addEventListener('keydown', (e) => {
@@ -647,9 +791,14 @@ function initApp() {
     if (e.key === 'Enter') saveApiKey();
   });
 
-  // Pre-fill API key if exists
+  // Pre-fill API key input with active key, or auto-show modal if missing
   if (state.apiKey) {
     document.getElementById('api-key-input').value = state.apiKey;
+  } else {
+    // Automatically prompt user to enter key if none is loaded from .env or localStorage
+    setTimeout(() => {
+      showApiKeyModal();
+    }, 400);
   }
 }
 
